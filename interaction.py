@@ -82,13 +82,10 @@ def compute_order_interaction_img(args, model, img_adv, lbl, point_list, players
         model.eval()
         img_size = args.img_size
         channels = img_adv.size(0)
-        #print("channels:", channels)
         tic = time.time()
         adv_interaction = []  # save order interactions of point-pairs in adv image
-        #print("players.shape:", np.shape(players))  #(200, 100, 241)
 
         forward_mask = []
-        #print("point_list:", np.shape(point_list))  # (200, 2)
         for p, pt in enumerate(point_list):
             point1, point2 = pt[0], pt[1]
             # print("i: %d, j: %d" % (point1, point2))
@@ -116,21 +113,11 @@ def compute_order_interaction_img(args, model, img_adv, lbl, point_list, players
                 batch_mask = torch.cat(forward_mask, dim=0)
                 expand_img_adv = img_adv.expand(4 * forward_batch, -1, img_size, img_size).clone()
                 masked_img_adv = batch_mask * expand_img_adv
-                #print("masked_img_adv.shape:", masked_img_adv.size())     # torch.Size([400, 3, 32, 32])
-                #print("masked_img_adv:", masked_img_adv)
-                print("batch_mask.shape:",batch_mask.size())
-                print("batch_mask:", batch_mask)
-                # print("batch_mask.shape:",batch_mask.size())            # torch.Size([400, 3, 32, 32])
-                # print("expand_img_adv.shape", np.shape(expand_img_adv))         # torch.Size([400, 3, 32, 32])
 
                 output_adv = model(masked_img_adv)             # torch.Size([400, 10])
-                #print("output_adv.shape:", output_adv.size())
-                #print("output_adv:", output_adv)
 
                 if args.softmax_type == 'normal':
                     y_adv = F.log_softmax(output_adv, dim=1)[:, lbl]  # lbl[0]
-                    #print("y_adv.shape:", y_adv.size())        # torch.Size([400])
-                    #print("y_adv:", y_adv)                     # 都在-2.33 到 -2.30之间
 
                 for k in range(forward_batch):
                     score_adv = y_adv[4 * k] + y_adv[4 * k + 3] - y_adv[4 * k + 1] - y_adv[4 * k + 2]
@@ -143,24 +130,13 @@ def compute_order_interaction_img(args, model, img_adv, lbl, point_list, players
         adv_interaction = np.array(adv_interaction).reshape(-1, args.sample_num)
 
         print('Image: 1 张图 , time: %.3f' % ( time.time() - tic))   # time: 15.983s
-        print('--------------------------')
-        '''
-        tmp = "img{}_interaction.npy".format(lbl)
-        #np.save(os.path.join(args.m_inter_path, tmp), ori_interaction)  # (pair_num, sample_num)
-        np.save(os.path.join(args.m_inter_path, "adv_" + tmp), adv_interaction)
-        '''
-        #print("adv_interaction.shape:", np.shape(adv_interaction))     # (200, 100)
-        print("adv_interaction:",adv_interaction )
 
         return adv_interaction
 
 def gen_mask(r, pair_num, sample_num, grid_size, img_size, local_size=1):
     point_list = gene_local_points(grid_size, pair_num, local_size)       # (pair_num: 200, 2)
-    #print(f"point_list: {point_list}, point_list.shape:{ np.shape(point_list) }")
     players = gen_context(point_list, grid_size, sample_num, r=r)         # (pair_num: 200, context_num: 100, r: 58)
-    #print(f"players: {players}, players.shape:{ np.shape(players) }")
     channels = 3
-
     batch_mask = torch.zeros((pair_num*sample_num*4, grid_size**2), dtype=torch.uint8, device=device)
     for idx, ((point1, point2), players_thispair) in enumerate(zip(point_list, players)):
         mask = torch.zeros((sample_num, grid_size**2), dtype=torch.uint8, device=device).to(device)    # (sample_num, grid_size**2)
@@ -174,7 +150,6 @@ def gen_mask(r, pair_num, sample_num, grid_size, img_size, local_size=1):
     batch_mask = torch.unsqueeze(batch_mask, dim=1).expand(-1, channels, -1)    # (pair_num*sample_num*4, channels, grid_size**2)
     batch_mask = batch_mask.view(pair_num*sample_num*4, channels, grid_size, grid_size)
     batch_mask = F.interpolate(batch_mask.clone(), size=[img_size, img_size], mode="nearest")
-    print(f"batch_mask: {batch_mask}, batch_mask.shape:{ batch_mask.size() }")  # [80000, 3, 32, 32]
     return batch_mask
 
 
@@ -182,11 +157,9 @@ def compute_order_interaction_img_timecut(net, imgs, lbls, mask, pair_num, sampl
     mask_size = mask.size(0)    # pair_num*sample_num*4 : 80000
     assert pair_num * sample_num * 4 == mask_size
     N = imgs.size(0)
-    print(f"N:{N}")
     expand_imgs = imgs.repeat_interleave(mask_size, dim=0)
     batch_mask = mask.repeat(N, 1, 1, 1)
     masked_imgs = batch_mask * expand_imgs
-    print(f"masked_imgs: {masked_imgs}, masked_imgs.shape:{ masked_imgs.size() }")
 
     net.eval()
     logits = F.log_softmax(net(masked_imgs), dim=-1)  # Shape: (N*pair_num*sample_num*4, num_classes)
