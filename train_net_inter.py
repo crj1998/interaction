@@ -3,9 +3,7 @@
 # @Date:   2021-02-28 15:31:30
 # @Last Modified by:   Chen Renjie
 # @Last Modified time: 2021-02-28 20:45:03
-Project_root = '/home1/yswang/cl/data'
 import sys
-sys.path.append(Project_root)
 
 import os
 import random
@@ -49,7 +47,7 @@ class Logger(object):
         self.logger.addHandler(console)
         self.logger.addHandler(fh)
 
-def createCIFARmini(root="../data/", train=True, num_per_class=500):
+def createCIFARmini(root="./data/", train=True, num_per_class=500):
     """Create mini CIFAR10
 
     Fisrt, download torchvision.datasets.CIFAR10's raw data, then parse raw CIFAR10 file and extract part of data.
@@ -63,16 +61,15 @@ def createCIFARmini(root="../data/", train=True, num_per_class=500):
         ndarray, ndarray -- images (num_per_class, 3, 32, 32), labels(num_per_class, )
     """
     assert isinstance(train, bool)
-    print(os.path.abspath(os.path.join(root, "cifar-10-batches-py")))
     if not os.path.exists(os.path.join(root, "cifar-10-batches-py")):
         raise RuntimeError("Download CIFAR10 first.")
     path = os.path.join(root, "cifar-10-mini")
     if not os.path.exists(path):
         os.mkdir(path)
     if train:
-        save_path = os.path.join(path, "train_batch")
+        save_path = os.path.join(path, f"train_batch_{num_per_class}")
     else:
-        save_path = os.path.join(path, "test_batch")
+        save_path = os.path.join(path, f"test_batch_{num_per_class}")
     if os.path.exists(save_path):
         with open(save_path, 'rb') as f:
             data_dict = pickle.load(f, encoding="bytes")
@@ -287,8 +284,8 @@ class Logistic_trainer:
             train_set = datasets.CIFAR10(root=self.path["data_path"], train=True, download=True, transform=train_transform)
             test_set = datasets.CIFAR10(root=self.path["data_path"], train=False, download=True, transform=test_transform)
         elif self.args.dataset == "cifar-10-mini":
-            train_set = CIFAR10mini(root='../data', train=True, transform=train_transform)
-            test_set = CIFAR10mini(root='../data', train=False, transform=test_transform)
+            train_set = CIFAR10mini(root='./data', train=True, transform=train_transform, num_per_class=20)
+            test_set = CIFAR10mini(root='./data', train=False, transform=test_transform, num_per_class=20)
         else:
             train_set = datasets.ImageFolder(root=self.path["data_path"] + "/train", transform=self.train_transform)
             test_set = datasets.ImageFolder(root=self.path["data_path"] + "/test", transform=self.test_transform)
@@ -307,32 +304,50 @@ class Logistic_trainer:
         acc = torch.sum(pre == lbl).item() / len(pre)
         return 1 - acc
 
+    def train_DNN_raw(self):
+        self.model.train()
+        self.model.to(self.device)
+        # torch.autograd.set_detect_anomaly(True)
+        Loss, Loss_ce, Error = 0, 0, 0
+        for i, (img, lbl) in enumerate(self.train_loader):
+            img = img.to(self.device)          # shape: torch.Size([64, 3, 32, 32])
+            lbl = lbl.to(self.device)
+
+            output = self.model(img)
+            loss = self.criterion(output, lbl)
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            pre = output.detach().max(1)[1]
+            error = self.get_error(pre, lbl)
+
+            Error += error
+            Loss += loss.cpu().item()
+
+            self.logger.info(f"[Train raw] batch {i + 1}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+
     def train_DNN(self):
         self.model.train()
         self.model.to(self.device)
-        torch.autograd.set_detect_anomaly(True)
-
+        # torch.autograd.set_detect_anomaly(True)
         Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
+        Loss_inter_ori, Loss_inter_adv = 0, 0
         for i, (img, lbl) in enumerate(self.train_loader):
-            #print("img:",img)
             img = img.to(self.device)          # shape: torch.Size([64, 3, 32, 32])
             lbl = lbl.to(self.device)
             img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False) #cifar10需要isnormalize吗
             self.model.train()
-            #print("img_adv:",img_adv)
-
-            output = self.model(img_adv)
-            #print("output:", output)
-            #output = self.model(normalize(img_adv))
+            output = self.model(img_adv.to(self.device))
             loss_ce = self.criterion(output, lbl)
-            #print("loss_ce:",loss_ce)
-            loss_inter_adv = inter_m_order(args, self.model, img_adv, lbl, self.logger)
-            print("loss_inter_adv:", loss_inter_adv)
+            loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+            # loss = loss_ce + self.lam * loss_inter_adv
+            loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
+            loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
+            loss = loss_ce + self.lam * loss_inter    # loss 2
             self.model.train()
-            loss = loss_ce - self.lam * loss_inter_adv                                          # loss 1
-            print("loss:", loss)
-            # loss_inter_img = inter_m_order(self.model, img, lbl, self.device)
-            # loss = loss_ce + self.lam * torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)    # loss 2
+
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -344,12 +359,11 @@ class Logistic_trainer:
             Error += error
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
-            Loss_inter += loss_inter_adv.cpu().item()
+            Loss_inter += loss_inter.cpu().item()
+            Loss_inter_ori += loss_inter_img.mean().cpu().item()
+            Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-            self.logger.info(f"[Train] batch {i + 1}: loss_ce: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss: {Error / (i + 1):0.3f}")
-
-            if i % 10 == 0:
-                print("[train] batch: %d, loss_ce: %.3f, loss_inter: %.3f, loss: %.3f, error: %.3f" % (i + 1, Loss_ce / (i+1), Loss_inter / (i+1), Loss / (i + 1), Error / (i + 1)))
+            self.logger.info(f"[Train] batch {i + 1}: loss_ce: {Loss_ce / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
         self.list[1].append(Error / (i + 1))
@@ -360,19 +374,19 @@ class Logistic_trainer:
         self.model.to(self.device)
 
         Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
-        for i, (img, lbl) in enumerate(self.test_loader):
-            with torch.no_grad():
+        with torch.no_grad():
+            for i, (img, lbl) in enumerate(self.test_loader):
                 img = img.to(self.device)
                 lbl = lbl.to(self.device)
                 img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
 
-                output = self.model(normalize(img_adv))
+                output = self.model(img_adv)
                 loss_ce = self.criterion(output, lbl)
-                loss_inter_adv = inter_m_order(self.model, img_adv, lbl, self.device, self.logger)  # 一次对一个batch计算interaction
-
-                loss = loss_ce - self.lam * loss_inter_adv                                          # loss 1
-                # loss_inter_img = inter_m_order(self.model, img, lbl, self.device)
-                # loss = loss_ce + self.lam * torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)    # loss 2
+                loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+                # loss = loss_ce + self.lam * loss_inter_adv
+                loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
+                loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
+                loss = loss_ce + self.lam * loss_inter    # loss 2
 
                 pre = output.detach().max(1)[1]
                 error = self.get_error(pre, lbl)
@@ -380,10 +394,9 @@ class Logistic_trainer:
                 Error += error
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
-                Loss_inter += loss_inter_adv.cpu().item()
+                Loss_inter += loss_inter.cpu().item()
 
-                if i % 10 == 0:
-                    print("[test] batch: %d, loss_ce: %.3f, loss_inter: %.3f,  loss: %.3f, error: %.3f" % (i + 1, Loss_ce / (i+1), Loss_inter / (i+1), Loss / (i + 1), Error / (i + 1)))
+                self.logger.info(f"[test] batch {i + 1}: loss_ce: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
         self.list[3].append(Error / (i + 1))
@@ -434,17 +447,17 @@ class Logistic_trainer:
             plt.close()
 
     def work(self):
+        if self.start_epoch==0:
+            self.train_DNN_raw()
         for epoch in range(self.start_epoch, self.epoch_num):
             self.logger.debug(f"Epoch {epoch} start...")
             seed_torch(epoch + args.batchsize)
             self.lr = self.get_learning_rate()
-            print("epoch:",epoch)
             self.train_DNN()
             self.test_DNN()
             if (epoch%self.args.save_epoch == 0) or (epoch == self.epoch_num-1):
                 self.save_latest_epoch(epoch)
             self.draw_figure()
-            break
         self.draw_figure()
         self.print_and_save_list()
         self.draw_parameters()
@@ -485,29 +498,28 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--dataset", default="cifar-10-mini", type=str, help="Dataset.")   # "CIFAR10"
     parser.add_argument('--device', default=0, type=int)
     parser.add_argument("--log", choices=["debug", "info"], default="debug", help='Log print level.')
-    parser.add_argument("--root", default='../', type=str)
+    parser.add_argument("--root", default='./', type=str)
     parser.add_argument("--fine_tune_path", default=None, type=str)
 
     parser.add_argument("--num_class", default=10, type=int, help="Number of image classes")
     parser.add_argument("--epoch_num", default=50, type=int, help="Number of Epochs")        # 50
     parser.add_argument("--start_epoch", default=0, type=int, help="Train start from # epochs")
-    parser.add_argument("--save_epoch", default=10, type=int, help="Save model every # epochs")
-    parser.add_argument("--batchsize", default=4, type=int, help="Batch size")
+    parser.add_argument("--save_epoch", default=1, type=int, help="Save model every # epochs")
+    parser.add_argument("--batchsize", default=2, type=int, help="Batch size")
     parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
     parser.add_argument("--gamma", default=0.9, type=float)
     parser.add_argument("--momentum", default=0.9, type=float)
     parser.add_argument("--weight_decay", default=1e-4, type=float)
     parser.add_argument("--opt", default="SGD", type=str)
     parser.add_argument("--seed", default=0, type=int, help="random seed")
-    parser.add_argument("--lam", type=float, default=1)
+    parser.add_argument("--lam", type=float, default=-0.1)
     parser.add_argument("--order", type=float, default=0.95)
 
     parser.add_argument("--grid-size", default=8, type=int)
     parser.add_argument("--img-size", default=32, type=int)
     parser.add_argument("--pair_num", default=50, type=int, help='number of point pair of each test img')    # 50
-    parser.add_argument("--sample_num", default=100, type=int, help='sample num of S')
-    parser.add_argument("--ratios", default=[0.95], type=list,
-                        help='ratios of context') #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1]
+    parser.add_argument("--sample_num", default=32, type=int, help='sample num of S')
+    parser.add_argument("--ratios", default=[0.95], type=list, help='ratios of context') #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1]
     parser.add_argument("--cal_batch", default=80, type=int, help='calculate # of images per forward')
     parser.add_argument('--softmax_type', default='normal', type=str)
 
@@ -525,8 +537,7 @@ if __name__ == "__main__":
     elif args.dataset == "CIFAR10" or args.dataset == "cifar-10-mini":
         img_size = 32
     args.data_path = os.path.join(args.root, "data", args.dataset)
-    print(os.path.abspath(args.data_path))
-    print(args.data_path)
+
     train_transform = transforms.Compose([
         transforms.RandomCrop(img_size, padding=4),
         transforms.RandomHorizontalFlip(),
