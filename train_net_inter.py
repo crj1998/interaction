@@ -284,8 +284,8 @@ class Logistic_trainer:
             train_set = datasets.CIFAR10(root=self.path["data_path"], train=True, download=True, transform=train_transform)
             test_set = datasets.CIFAR10(root=self.path["data_path"], train=False, download=True, transform=test_transform)
         elif self.args.dataset == "cifar-10-mini":
-            train_set = CIFAR10mini(root='./data', train=True, transform=train_transform, num_per_class=20)
-            test_set = CIFAR10mini(root='./data', train=False, transform=test_transform, num_per_class=20)
+            train_set = CIFAR10mini(root='./data', train=True, transform=train_transform, num_per_class=self.args.train_per_class)
+            test_set = CIFAR10mini(root='./data', train=False, transform=test_transform, num_per_class=self.args.test_per_class)
         else:
             train_set = datasets.ImageFolder(root=self.path["data_path"] + "/train", transform=self.train_transform)
             test_set = datasets.ImageFolder(root=self.path["data_path"] + "/test", transform=self.test_transform)
@@ -347,7 +347,7 @@ class Logistic_trainer:
             loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
             loss = loss_ce + self.lam * loss_inter    # loss 2
             self.model.train()
-
+            
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -496,6 +496,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model", default="resnet18", choices=["resnet18", "resnet34", "resnet50"], type=str, help="Backbone Network {Res-18, Res-34, Res-50}.")
     parser.add_argument("-d", "--dataset", default="cifar-10-mini", type=str, help="Dataset.")   # "CIFAR10"
+    parser.add_argument("--train_per_class", default=500, type=int, help="train num per class")
+    parser.add_argument("--test_per_class", default=100, type=int, help="test num per class")
     parser.add_argument('--device', default=0, type=int)
     parser.add_argument("--log", choices=["debug", "info"], default="debug", help='Log print level.')
     parser.add_argument("--root", default='./', type=str)
