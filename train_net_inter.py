@@ -25,7 +25,6 @@ import torchvision.datasets as datasets
 
 from torch.utils.data import Dataset, DataLoader
 
-
 from interaction import inter_m_order
 
 class Logger(object):
@@ -306,31 +305,50 @@ class Logistic_trainer:
 
     def train_DNN_raw(self):
         self.model.train()
-        self.model.to(self.device)
-        # torch.autograd.set_detect_anomaly(True)
-        Loss, Loss_ce, Error = 0, 0, 0
-        for i, (img, lbl) in enumerate(self.train_loader):
-            img = img.to(self.device)          # shape: torch.Size([64, 3, 32, 32])
-            lbl = lbl.to(self.device)
+        Loss, Error = 0, 0
+        for i, (images, labels) in enumerate(self.train_loader):
+            images, labels = images.to(self.device), labels.to(self.device)
 
-            output = self.model(img)
-            loss = self.criterion(output, lbl)
+            output = self.model(images)
+            loss = self.criterion(output, labels)
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
-            pre = output.detach().max(1)[1]
-            error = self.get_error(pre, lbl)
+            preds = output.detach().argmax(dim=1)
+            error = self.get_error(preds, labels)
 
             Error += error
             Loss += loss.cpu().item()
 
             self.logger.info(f"[Train raw] batch {i + 1}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
 
+    def test_DNN_raw(self):
+        self.model.eval()
+        Loss, Error = 0, 0
+        with torch.no_grad():
+            for i, (images, labels) in enumerate(self.test_loader):
+                images, labels = images.to(self.device), labels.to(self.device)
+
+                output = self.model(images)
+                loss = self.criterion(output, labels)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                preds = output.detach().argmax(dim=1)
+                error = self.get_error(preds, labels)
+
+                Error += error
+                Loss += loss.cpu().item()
+
+                self.logger.info(f"[Test raw] batch {i + 1}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+
+
     def train_DNN(self):
         self.model.train()
-        self.model.to(self.device)
         # torch.autograd.set_detect_anomaly(True)
         Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
         Loss_inter_ori, Loss_inter_adv = 0, 0
@@ -363,7 +381,7 @@ class Logistic_trainer:
             Loss_inter_ori += loss_inter_img.mean().cpu().item()
             Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-            self.logger.info(f"[Train] batch {i + 1}: loss_ce: {Loss_ce / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+            self.logger.info(f"[Train] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
         self.list[1].append(Error / (i + 1))
@@ -371,9 +389,9 @@ class Logistic_trainer:
 
     def test_DNN(self):
         self.model.eval()
-        self.model.to(self.device)
 
         Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
+        Loss_inter_ori, Loss_inter_adv = 0, 0
         with torch.no_grad():
             for i, (img, lbl) in enumerate(self.test_loader):
                 img = img.to(self.device)
@@ -395,8 +413,10 @@ class Logistic_trainer:
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
                 Loss_inter += loss_inter.cpu().item()
+                Loss_inter_ori += loss_inter_img.mean().cpu().item()
+                Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-                self.logger.info(f"[test] batch {i + 1}: loss_ce: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+                self.logger.info(f"[test] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
         self.list[3].append(Error / (i + 1))
@@ -455,9 +475,11 @@ class Logistic_trainer:
             self.lr = self.get_learning_rate()
             self.train_DNN()
             self.test_DNN()
+            self.test_DNN_raw()
             if (epoch%self.args.save_epoch == 0) or (epoch == self.epoch_num-1):
                 self.save_latest_epoch(epoch)
             self.draw_figure()
+            self.print_and_save_list()
         self.draw_figure()
         self.print_and_save_list()
         self.draw_parameters()
