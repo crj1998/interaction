@@ -362,7 +362,7 @@ class Logistic_trainer:
                 loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
                 Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                 if self.loss_type==1:
-                    loss = loss_ce + self.lam * loss_inter_adv
+                    loss = loss_ce + self.lam * loss_inter_adv.mean()
                 elif self.loss_type==2:
                     loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
                     loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
@@ -412,7 +412,7 @@ class Logistic_trainer:
                     loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
                     Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                     if self.loss_type==1:
-                        loss = loss_ce + self.lam * loss_inter_adv
+                        loss = loss_ce + self.lam * loss_inter_adv.mean()
                     elif self.loss_type==2:
                         loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
                         loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
