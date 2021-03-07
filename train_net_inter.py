@@ -335,10 +335,6 @@ class Logistic_trainer:
                 output = self.model(images)
                 loss = self.criterion(output, labels)
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-
                 preds = output.detach().argmax(dim=1)
                 error = self.get_error(preds, labels)
 
