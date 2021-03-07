@@ -209,6 +209,7 @@ class Logistic_trainer:
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.args = args
+        self.loss_type = args.loss_type
         self.lr = args.lr
         self.gamma = args.gamma
         self.bs = args.batchsize
@@ -355,31 +356,40 @@ class Logistic_trainer:
         for i, (img, lbl) in enumerate(self.train_loader):
             img = img.to(self.device)          # shape: torch.Size([64, 3, 32, 32])
             lbl = lbl.to(self.device)
-            img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False) #cifar10需要isnormalize吗
+            img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
             self.model.train()
-            output = self.model(img_adv.to(self.device))
+            output = self.model(img_adv)
             loss_ce = self.criterion(output, lbl)
-            loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
-            # loss = loss_ce + self.lam * loss_inter_adv
-            loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
-            loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
-            loss = loss_ce + self.lam * loss_inter    # loss 2
-            self.model.train()
-            
+            if self.loss_type==0:
+                loss = loss_ce
+            else:
+                loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+                Loss_inter_adv += loss_inter_adv.mean().cpu().item()
+                if self.loss_type==1:
+                    loss = loss_ce + self.lam * loss_inter_adv
+                elif self.loss_type==2:
+                    loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
+                    loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
+                    loss = loss_ce + self.lam * loss_inter    # loss 2
+                    Loss_inter_ori += loss_inter_img.mean().cpu().item()
+                    Loss_inter += loss_inter.cpu().item()
+                else:
+                    raise ValueError("Unknown Loss type.")
+                self.model.train()
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
-            pre = output.detach().max(1)[1]
+            pre = output.detach().argmax(dim=1)
             error = self.get_error(pre, lbl)
 
             Error += error
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
-            Loss_inter += loss_inter.cpu().item()
-            Loss_inter_ori += loss_inter_img.mean().cpu().item()
-            Loss_inter_adv += loss_inter_adv.mean().cpu().item()
+            # Loss_inter += loss_inter.cpu().item()
+            # Loss_inter_ori += loss_inter_img.mean().cpu().item()
+            # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
             self.logger.info(f"[Train] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
@@ -400,21 +410,32 @@ class Logistic_trainer:
 
                 output = self.model(img_adv)
                 loss_ce = self.criterion(output, lbl)
-                loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
-                # loss = loss_ce + self.lam * loss_inter_adv
-                loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
-                loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
-                loss = loss_ce + self.lam * loss_inter    # loss 2
+                if self.loss_type==0:
+                    loss = loss_ce
+                else:
+                    loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+                    Loss_inter_adv += loss_inter_adv.mean().cpu().item()
+                    if self.loss_type==1:
+                        loss = loss_ce + self.lam * loss_inter_adv
+                    elif self.loss_type==2:
+                        loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
+                        loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
+                        loss = loss_ce + self.lam * loss_inter    # loss 2
+                        Loss_inter_ori += loss_inter_img.mean().cpu().item()
+                        Loss_inter += loss_inter.cpu().item()
+                    else:
+                        raise ValueError("Unknown Loss type.")
+                    self.model.train()
 
-                pre = output.detach().max(1)[1]
+                pre = output.detach().argmax(dim=1)
                 error = self.get_error(pre, lbl)
 
                 Error += error
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
-                Loss_inter += loss_inter.cpu().item()
-                Loss_inter_ori += loss_inter_img.mean().cpu().item()
-                Loss_inter_adv += loss_inter_adv.mean().cpu().item()
+                # Loss_inter += loss_inter.cpu().item()
+                # Loss_inter_ori += loss_inter_img.mean().cpu().item()
+                # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
                 self.logger.info(f"[test] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
@@ -524,7 +545,7 @@ if __name__ == "__main__":
     parser.add_argument("--log", choices=["debug", "info"], default="debug", help='Log print level.')
     parser.add_argument("--root", default='./', type=str)
     parser.add_argument("--fine_tune_path", default=None, type=str)
-
+    parser.add_argument("--loss_type", choices=[0, 1, 2], default=0, type=int)
     parser.add_argument("--num_class", default=10, type=int, help="Number of image classes")
     parser.add_argument("--epoch_num", default=50, type=int, help="Number of Epochs")        # 50
     parser.add_argument("--start_epoch", default=0, type=int, help="Train start from # epochs")
