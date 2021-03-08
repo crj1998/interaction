@@ -31,5 +31,5 @@ Tesla T4 16G at least.
 !git clone https://github.com/crj1998/interaction.git
 ```
 ```
-!python ./interaction/train_net_inter.py --start_epoch 2 --lam 5.0 --train_per_class 20 --test_per_class 20 --batchsize 2 --pair_num 50 --sample_num 32
+!python ./interaction/train_net_inter.py --start_epoch 0 --lam 1.0 loss_type 2 --batchsize 50 --pair_num 32 --sample_num 2 --train_per_class 500 --test_per_class 100 
 ```
