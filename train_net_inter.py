@@ -8,12 +8,10 @@ import sys
 import os
 import random
 import argparse
-import logging
-from logging import handlers
+
 import numpy as np
 import matplotlib.pyplot as plt
-import pickle
-from PIL import Image
+
 
 import torch
 import torch.optim as optim
@@ -23,173 +21,12 @@ import torchvision
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
 from interaction import inter_m_order
+from dataset import CIFAR10mini
+from utils import Logger, madrys
 
-class Logger(object):
-    level_relations = {
-        'debug': logging.DEBUG,
-        'info': logging.INFO,
-        'warning': logging.WARNING,
-        'error': logging.ERROR,
-        'crit': logging.CRITICAL
-    }
-    def __init__(self, filename, level='info', when='D', backCount=3, fmt='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S"):
-        if os.path.exists(filename):
-            os.remove(filename)
-        format_str = logging.Formatter(fmt, datefmt)
-        self.logger = logging.getLogger(filename)
-        self.logger.setLevel(self.level_relations.get(level))
-        console = logging.StreamHandler()
-        console.setFormatter(format_str)
-        fh = handlers.TimedRotatingFileHandler(filename=filename, when=when, backupCount=backCount, encoding='utf-8')
-        fh.setFormatter(format_str)
-        self.logger.addHandler(console)
-        self.logger.addHandler(fh)
-
-def createCIFARmini(root="./data/", train=True, num_per_class=500):
-    """Create mini CIFAR10
-
-    Fisrt, download torchvision.datasets.CIFAR10's raw data, then parse raw CIFAR10 file and extract part of data.
-
-    Keyword Arguments:
-        root {str} -- same as torchvision.datasets.CIFAR10's root (default: {"./data/"})
-        train {bool} -- Train or test set (default: {True})
-        num_per_class {number} -- number of images per class (default: {500})
-
-    Returns:
-        ndarray, ndarray -- images (num_per_class, 3, 32, 32), labels(num_per_class, )
-    """
-    assert isinstance(train, bool)
-    if not os.path.exists(os.path.join(root, "cifar-10-batches-py")):
-        raise RuntimeError("Download CIFAR10 first.")
-    path = os.path.join(root, "cifar-10-mini")
-    if not os.path.exists(path):
-        os.mkdir(path)
-    if train:
-        save_path = os.path.join(path, f"train_batch_{num_per_class}")
-    else:
-        save_path = os.path.join(path, f"test_batch_{num_per_class}")
-    if os.path.exists(save_path):
-        with open(save_path, 'rb') as f:
-            data_dict = pickle.load(f, encoding="bytes")
-        return data_dict[b'data'], data_dict[b'labels']
-
-    if train:
-        print(os.path.abspath(os.path.join(root, "cifar-10-batches-py/data_batch_1")))
-        data_path = os.path.join(root, "cifar-10-batches-py/data_batch_1")
-    else:
-        data_path = os.path.join(root, "cifar-10-batches-py/test_batch")
-    with open(data_path, 'rb') as f:
-        data_dict = pickle.load(f, encoding="bytes")
-    del data_dict[b'batch_label'], data_dict[b'filenames']
-    labels = np.array(data_dict[b'labels'])
-    images = np.reshape(data_dict[b'data'], (10000, 3, 32, 32))
-    images = images.transpose((0, 2, 3, 1))
-    CLASSES = 10
-    index = np.zeros((CLASSES * num_per_class,), dtype=np.uint16)
-    count = np.zeros((CLASSES,), dtype=np.uint16)
-    num = 0
-    for i, label in enumerate(labels):
-        if count[label] < num_per_class:
-            index[num] = i
-            count[label] += 1
-            num += 1
-        if (count >= num_per_class).all():
-            break
-
-    data_dict[b'labels'] = labels[index]
-    data_dict[b'data'] = images[index]
-
-    with open(save_path, 'wb') as f:
-        pickle.dump(data_dict, f)
-    return data_dict[b'data'], data_dict[b'labels']
-
-class CIFAR10mini(Dataset):
-    """ Load CIFAR10 mini
-    Use like torchvision.datasets.CIFAR10, just add num_per_class parameter, which means how many samples used.
-    """
-
-    def __init__(self, root, train=True, num_per_class=500, transform=None):
-        super(CIFAR10mini, self).__init__()
-        assert isinstance(train, bool)
-        self.images, self.labels = createCIFARmini(root, train, num_per_class)
-        self.num_samples = self.labels.shape[0]
-        self.transform = transform
-
-    def __getitem__(self, index):
-        image, label = self.images[index], self.labels[index]
-        image = Image.fromarray(image)
-
-        if self.transform:
-            image = self.transform(image)
-
-        return image, label
-
-    def __len__(self):
-        return self.num_samples
-
-
-def madrys(model, x_natural, y,  # label or target
-    device,
-    step_size=0.021,
-    epsilon=0.031,
-    perturb_steps=3,
-    distance='l_inf',
-    isnormalize=True,
-    mean=None,
-    std=None,
-    targeted=False
-):
-    model.eval()
-    if distance == 'l_inf':
-        x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()    # random start
-    elif distance == 'l_2':
-        delta = torch.zeros_like(x_natural).to(device).detach()
-        delta.normal_()
-        d_flat = delta.view(delta.size(0), -1)
-        n = d_flat.norm(p=2, dim=1).view(delta.size(0), 1, 1, 1)
-        r = torch.zeros_like(n).uniform_(0, 1)
-        delta *= r / n * epsilon
-        x_adv = x_natural.detach() + delta
-    x_adv = torch.clamp(x_adv, min=0, max=1)     # x_adv is in [0,1]
-
-    if targeted:  # targeted
-        multiplier = -1
-    else:          # non-targeted
-        multiplier = 1
-
-    for _ in range(perturb_steps):
-        x_adv.requires_grad_()
-        with torch.enable_grad():
-            if isnormalize:
-                if (type(model(normalize(x_adv, mean, std))).__name__ == 'tuple') :
-                    output, _ = model(normalize(x_adv, mean, std))
-                else:
-                    output = model(normalize(x_adv, mean, std))
-            else:
-                if (type(model(x_adv)).__name__ == 'tuple') :
-                    output, _ = model(x_adv)
-                else:
-                    output = model(x_adv)
-            loss_ce = F.cross_entropy(output, y)
-            loss_ce = multiplier * loss_ce
-        grad = torch.autograd.grad(loss_ce, [x_adv])[0]    # 是放入x_adv还是  normalize(x_adv)
-
-        if distance == 'l_inf':
-            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
-            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
-            x_adv = torch.clamp(x_adv, 0.0, 1.0)
-        elif distance == 'l_2':
-            g_norm = torch.norm(grad.view(grad.shape[0], -1), dim=1).view(-1, 1, 1, 1)
-            scaled_g = grad / (g_norm + 1e-10)
-            x_adv = x_adv.detach() + step_size * scaled_g
-            delta = x_adv - x_natural
-            delta = delta.renorm(p=2, dim=0, maxnorm=epsilon)
-            x_adv = torch.clamp(x_natural + delta, 0.0, 1.0)
-
-    return x_adv
 
 
 def seed_torch(seed=0):
@@ -223,8 +60,12 @@ class Logistic_trainer:
         self.fine_tune_path = args.fine_tune_path
         self.lam = args.lam
         self.order = args.order
-        self.list = [[], [], [], [], [], [], [], []]
-        self.logger = Logger(os.path.join(self.path["result_path"], "log.txt"), level=args.log).logger
+        self.seed_num = args.seed
+        self.list = [[], [], [], [], [], []]
+        filename = os.path.join(self.path["result_path"], "log.txt")
+        if self.start_epoch!=0 and os.path.exists(filename):
+            os.remove(filename) 
+        self.logger = Logger(filename, level=args.log).logger
         self.save_hparam(args)
 
     def save_hparam(self, args):
@@ -233,7 +74,7 @@ class Logistic_trainer:
             args_dict = args.__dict__
             for key in args_dict:
                 f.write(f"{key} : {args_dict[key]}\n")
-        self.logger.debug(" Save the hyper-parameter!")
+        self.logger.debug("Save the hyper-parameter!")
 
     def load_latest_epoch(self):
         model_path = os.path.join(self.path["result_path"], "model.pkl")
@@ -249,7 +90,7 @@ class Logistic_trainer:
         torch.save(self.list, list_path)
         self.logger.debug(f"Save lastest epoch({epoch})")
 
-    def prepare_model(self, seed_num):
+    def prepare_model(self):
         if self.args.model == "resnet18":
             self.model = torchvision.models.resnet18(pretrained=False, num_classes=self.num_class)
         elif self.args.model == "resnet34":
@@ -259,10 +100,10 @@ class Logistic_trainer:
         else:
             self.logger.error(f"Unknown model name: {self.args.model}")
             raise ValueError(f"Unknown model name: {self.args.model}")
-        self.seed_num = seed_num
 
         if self.start_epoch != 0:
             self.load_latest_epoch()
+            self.start_epoch = len(self.list[0])
         if self.fine_tune_path:
             self.model.load_state_dict(torch.load(self.fine_tune_path))
 
@@ -344,6 +185,9 @@ class Logistic_trainer:
                 Loss += loss.cpu().item()
 
                 self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+        self.list[4].append(Loss / (i + 1))
+        self.list[5].append(Error / (i + 1))
+
 
 
     def train_DNN(self):
@@ -385,9 +229,6 @@ class Logistic_trainer:
             Error += error
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
-            # Loss_inter += loss_inter.cpu().item()
-            # Loss_inter_ori += loss_inter_img.mean().cpu().item()
-            # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
             self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
@@ -467,9 +308,11 @@ class Logistic_trainer:
             train_error = self.list[1]
             test_loss = self.list[2]
             test_error = self.list[3]
+            test_loss_raw = self.list[4]
+            test_error_raw = self.list[5]
 
             for i in range(len(train_loss)):
-                f.write(f"Epoch{i+1:3d} train_loss:{train_loss[i]:0.3f}, train_error:{train_error[i]:0.3f}, test_loss:{test_loss[i]:0.3f}, test_error:{test_error[i]:0.3f}\n")
+                f.write(f"Epoch{i+1:3d} train_loss:{train_loss[i]:0.3f}, train_error:{train_error[i]:0.3f}, test_loss:{test_loss[i]:0.3f}, test_error:{test_error[i]:0.3f}, test_loss_raw:{test_loss_raw[i]:0.3f}, test_error_raw:{test_error_raw[i]:0.3f}\n")
 
     def draw_parameters(self):
         self.path['distribution_path'] = os.path.join(self.path['result_path'], "distribution")
@@ -484,7 +327,7 @@ class Logistic_trainer:
 
     def work(self):
         if self.loss_type!=0 and self.start_epoch==0:
-            for _ in range(5):
+            for _ in range(1):
                 self.train_DNN_raw()
                 self.test_DNN_raw()
         for epoch in range(self.start_epoch, self.epoch_num):
@@ -566,8 +409,7 @@ if __name__ == "__main__":
     parser.add_argument('--softmax_type', default='normal', type=str)
 
     args = parser.parse_args()
-    seed_num = args.seed
-    seed_torch(seed_num)
+    seed_torch(args.seed)
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.device)
 
     args.result_path = os.path.join(args.root, "result", f"{args.dataset}_{args.model}_{args.loss_type}_{args.lam}")
@@ -591,7 +433,7 @@ if __name__ == "__main__":
     ])
 
     trainer = Logistic_trainer(args)
-    trainer.prepare_model(seed_num=seed_num)
+    trainer.prepare_model()
     trainer.prepare_dataset(data_path=args.data_path, train_transform=train_transform, train_shuffle=True, test_transform=test_transform, test_shuffle=True)
 
     trainer.work()
