@@ -10,8 +10,6 @@ import numpy as np
 device = 0
 
 def gene_local_points(grid_size, pair_num, local_size=1):
-    #grid_size = args.grid_size
-    #pair_num = args.pair_num
     neighbor = []
     for j in range(-local_size, local_size + 1):
         for h in range(-local_size, local_size + 1):
@@ -22,6 +20,7 @@ def gene_local_points(grid_size, pair_num, local_size=1):
                 neighbor.append(item)
 
     neighbor = np.array(neighbor)
+    np.random.seed(1)
 
     tot_pairs = []
     for k in range(pair_num):
@@ -56,6 +55,7 @@ def gene_local_points(grid_size, pair_num, local_size=1):
     return tot_pairs
 
 def gen_context(point_list, grid_size, sample_num, r=0.95):
+    np.random.seed(1)
     players = []
     m = int((grid_size ** 2 - 2) * r)  # m-order
     for p, (point1, point2) in enumerate(point_list):
