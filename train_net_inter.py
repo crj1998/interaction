@@ -41,7 +41,7 @@ def seed_torch(seed=0):
 class Logistic_trainer:
     def __init__(self, args):
         self.path = {}
-        self.path["root"] = os.getcwd()
+        self.path["root"] = args.root
         self.path["result_path"] = os.path.join(self.path["root"], args.result_path)
         if not os.path.exists(self.path["result_path"]):
             os.makedirs(self.path["result_path"])
@@ -285,15 +285,19 @@ class Logistic_trainer:
     def draw_figure(self):
         x = np.arange(0, len(self.list[0]), 1)
         train_l, train_e, test_l, test_e = np.array(self.list[0]), np.array(self.list[1]), np.array(self.list[2]), np.array(self.list[3])
+        test_lr, test_er = np.array(self.list[4]), np.array(self.list[5])
+        print(train_l, test_lr)
         plt.figure()
         plt.subplot(211)
         plt.plot(x, train_l, color='C0', label="Train")
         plt.plot(x, test_l, color='C1', label="Test")
+        plt.plot(x, test_lr, color='C2', label="Test raw")
         plt.xlabel("epoch")
         plt.ylabel("loss")
         plt.subplot(212)
         plt.plot(x, train_e, color='C0', label="Train")
         plt.plot(x, test_e, color='C1', label="Test")
+        plt.plot(x, test_er, color='C2', label="Test raw")
         plt.xlabel("epoch")
         plt.ylabel("error")
         plt.legend()
@@ -327,9 +331,9 @@ class Logistic_trainer:
 
     def work(self):
         if self.loss_type!=0 and self.start_epoch==0:
-            for _ in range(1):
+            for _ in range(5):
                 self.train_DNN_raw()
-                self.test_DNN_raw()
+                # self.test_DNN_raw()
         for epoch in range(self.start_epoch, self.epoch_num):
             self.logger.debug(f"Epoch {epoch} start...")
             seed_torch(epoch + args.batchsize)
