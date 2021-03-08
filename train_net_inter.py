@@ -166,8 +166,8 @@ class Logistic_trainer:
 
             Error += error
             Loss += loss.cpu().item()
-
-            self.logger.info(f"[Train raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+            if (i%10==0):
+                self.logger.info(f"[Train raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
 
     def test_DNN_raw(self):
         self.model.eval()
@@ -185,7 +185,8 @@ class Logistic_trainer:
                 Error += error
                 Loss += loss.cpu().item()
 
-                self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+                if (i%10==0):
+                    self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
         self.list[4].append(Loss / (i + 1))
         self.list[5].append(Error / (i + 1))
 
@@ -231,7 +232,8 @@ class Logistic_trainer:
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
 
-            self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+            if (i%5==0):
+                self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
         self.list[1].append(Error / (i + 1))
@@ -273,11 +275,9 @@ class Logistic_trainer:
                 Error += error
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
-                # Loss_inter += loss_inter.cpu().item()
-                # Loss_inter_ori += loss_inter_img.mean().cpu().item()
-                # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-                self.logger.info(f"[test] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+                if (i%5==0):
+                    self.logger.info(f"[test] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
         self.list[3].append(Error / (i + 1))
