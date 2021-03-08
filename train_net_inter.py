@@ -483,7 +483,7 @@ class Logistic_trainer:
             plt.close()
 
     def work(self):
-        if self.start_epoch==0:
+        if self.loss_type!=0 and self.start_epoch==0:
             for _ in range(5):
                 self.train_DNN_raw()
                 self.test_DNN_raw()
