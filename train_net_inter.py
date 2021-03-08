@@ -284,9 +284,9 @@ class Logistic_trainer:
 
     def draw_figure(self):
         x = np.arange(0, len(self.list[0]), 1)
-        train_l, train_e, test_l, test_e = np.array(self.list[0]), np.array(self.list[1]), np.array(self.list[2]), np.array(self.list[3])
+        train_l, train_e = np.array(self.list[0]), np.array(self.list[1])
+        test_l, test_e = np.array(self.list[2]), np.array(self.list[3])
         test_lr, test_er = np.array(self.list[4]), np.array(self.list[5])
-        print(train_l, test_lr)
         plt.figure()
         plt.subplot(211)
         plt.plot(x, train_l, color='C0', label="Train")
