@@ -36,6 +36,8 @@ class Logger(object):
         'crit': logging.CRITICAL
     }
     def __init__(self, filename, level='info', when='D', backCount=3, fmt='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S"):
+        if os.path.exists(filename):
+            os.remove(filename)
         format_str = logging.Formatter(fmt, datefmt)
         self.logger = logging.getLogger(filename)
         self.logger.setLevel(self.level_relations.get(level))
@@ -234,16 +236,16 @@ class Logistic_trainer:
         self.logger.debug(" Save the hyper-parameter!")
 
     def load_latest_epoch(self):
-        model_path = os.path.join(self.path["result_path"], f"model_{self.start_epoch-1}.pkl")
+        model_path = os.path.join(self.path["result_path"], "model.pkl")
         self.model.load_state_dict(torch.load(model_path))
-        list_path = os.path.join(self.path["result_path"], f"list_{self.start_epoch-1}.pkl")
+        list_path = os.path.join(self.path["result_path"], "list.pkl")
         self.list = torch.load(list_path)
         self.logger.debug(f"Load lastest epoch({self.start_epoch-1})")
 
     def save_latest_epoch(self, epoch):
-        model_path = os.path.join(self.path["result_path"], f"model_{epoch}.pkl")
+        model_path = os.path.join(self.path["result_path"], "model.pkl")
         torch.save(self.model.state_dict(), model_path)
-        list_path = os.path.join(self.path["result_path"], f"list_{epoch}.pkl")
+        list_path = os.path.join(self.path["result_path"], "list.pkl")
         torch.save(self.list, list_path)
         self.logger.debug(f"Save lastest epoch({epoch})")
 
@@ -323,7 +325,7 @@ class Logistic_trainer:
             Error += error
             Loss += loss.cpu().item()
 
-            self.logger.info(f"[Train raw] batch {i + 1}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+            self.logger.info(f"[Train raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
 
     def test_DNN_raw(self):
         self.model.eval()
@@ -341,7 +343,7 @@ class Logistic_trainer:
                 Error += error
                 Loss += loss.cpu().item()
 
-                self.logger.info(f"[Test raw] batch {i + 1}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+                self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
 
 
     def train_DNN(self):
@@ -387,7 +389,7 @@ class Logistic_trainer:
             # Loss_inter_ori += loss_inter_img.mean().cpu().item()
             # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-            self.logger.info(f"[Train] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+            self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
         self.list[1].append(Error / (i + 1))
@@ -433,7 +435,7 @@ class Logistic_trainer:
                 # Loss_inter_ori += loss_inter_img.mean().cpu().item()
                 # Loss_inter_adv += loss_inter_adv.mean().cpu().item()
 
-                self.logger.info(f"[test] batch {i + 1}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+                self.logger.info(f"[test] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
         self.list[3].append(Error / (i + 1))
@@ -473,19 +475,18 @@ class Logistic_trainer:
         self.path['distribution_path'] = os.path.join(self.path['result_path'], "distribution")
         if not os.path.exists(self.path['distribution_path']):
             os.makedirs(self.path['distribution_path'])
-        # print(self.model.named_parameters())
         for p in self.model.named_parameters():
             name = p[0].split(" Parameter containing:")[0].replace(".", "_") + ".jpg"
             fig_path = os.path.join(self.path['distribution_path'], name)
-            # print(fig_path)
-            # print(torch.flatten(p[1]))
             plt.hist(torch.flatten(p[1]).detach().cpu().numpy())
             plt.savefig(fig_path)
             plt.close()
 
     def work(self):
         if self.start_epoch==0:
-            self.train_DNN_raw()
+            for _ in range(5):
+                self.train_DNN_raw()
+                self.test_DNN_raw()
         for epoch in range(self.start_epoch, self.epoch_num):
             self.logger.debug(f"Epoch {epoch} start...")
             seed_torch(epoch + args.batchsize)
@@ -569,7 +570,7 @@ if __name__ == "__main__":
     seed_torch(seed_num)
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.device)
 
-    args.result_path = os.path.join(args.root, "result", f"{args.dataset}_{args.model}")
+    args.result_path = os.path.join(args.root, "result", f"{args.dataset}_{args.model}_{args.loss_type}_{args.lam}")
     if args.fine_tune_path:
         args.result_path = args.result_path + "_finetune"
 
