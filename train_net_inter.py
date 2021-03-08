@@ -40,12 +40,13 @@ def seed_torch(seed=0):
 
 class Logistic_trainer:
     def __init__(self, args):
-        self.path = {}
-        self.path["root"] = args.root
-        self.path["result_path"] = os.path.join(self.path["root"], args.result_path)
-        if not os.path.exists(self.path["result_path"]):
-            os.makedirs(self.path["result_path"])
-
+        if not os.path.exists(args.result_path):
+            os.makedirs(args.result_path)
+        self.path = {
+            "root": args.root,
+            "result_path": args.result_path
+        }
+        
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.args = args
         self.loss_type = args.loss_type
