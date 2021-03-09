@@ -65,10 +65,11 @@ class Logistic_trainer:
         self.list = [[], [], [], [], [], []]
 
         filename = os.path.join(self.path["result_path"], "log.txt")
-        # If restart training(start_epoch=0), and exists log.txt, delete it.
-        if self.start_epoch==0 and os.path.exists(filename):
-            os.remove(filename)
-        self.logger = Logger(filename, level=args.log).logger
+        # If restart training(start_epoch=0), write it , otherwise append.
+        if self.start_epoch==0:
+            self.logger = Logger(filename, level=args.log, mode="w").logger
+        else:
+            self.logger = Logger(filename, level=args.log, mode="a").logger
         self.save_hparam(args)
 
 

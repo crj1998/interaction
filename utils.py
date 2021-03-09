@@ -1,7 +1,6 @@
 
 import os
 import logging
-from logging import handlers
 
 import torch
 import torch.nn.functional as F
@@ -14,13 +13,13 @@ class Logger(object):
         'error': logging.ERROR,
         'crit': logging.CRITICAL
     }
-    def __init__(self, filename, level='info', when='D', backCount=3, fmt='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S"):
+    def __init__(self, filename, level='info', mode="a", fmt='%(asctime)s - %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S"):
         format_str = logging.Formatter(fmt, datefmt)
         self.logger = logging.getLogger(filename)
         self.logger.setLevel(self.level_relations.get(level))
         console = logging.StreamHandler()
         console.setFormatter(format_str)
-        fh = handlers.TimedRotatingFileHandler(filename=filename, when=when, backupCount=backCount, encoding='utf-8')
+        fh = logging.FileHandler(filename=filename, mode=mode, encoding='utf-8')
         fh.setFormatter(format_str)
         self.logger.addHandler(console)
         self.logger.addHandler(fh)
