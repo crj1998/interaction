@@ -101,6 +101,9 @@ class Logistic_trainer:
         else:
             self.logger.error(f"Unknown model name: {self.args.model}")
             raise ValueError(f"Unknown model name: {self.args.model}")
+        
+        if self.start_epoch==0 and os.path.exists(os.path.join(self.path["result_path"], "model.pkl")):
+            raise RuntimeError("There exists a model in the directory, use --start_epoch 1 to continue training. If want to retraining model, rename the directory first to backup.")
 
         if self.start_epoch != 0:
             self.load_latest_epoch()
