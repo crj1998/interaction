@@ -64,7 +64,7 @@ class Logistic_trainer:
         self.seed_num = args.seed
         self.list = [[], [], [], [], [], []]
         filename = os.path.join(self.path["result_path"], "log.txt")
-        if self.start_epoch!=0 and os.path.exists(filename):
+        if self.start_epoch==0 and os.path.exists(filename):
             os.remove(filename) 
         self.logger = Logger(filename, level=args.log).logger
         self.save_hparam(args)
@@ -103,7 +103,7 @@ class Logistic_trainer:
             raise ValueError(f"Unknown model name: {self.args.model}")
         
         if self.start_epoch==0 and os.path.exists(os.path.join(self.path["result_path"], "model.pkl")):
-            raise RuntimeError("There exists a model in the directory, use --start_epoch 1 to continue training. If want to retraining model, rename the directory first to backup.")
+            raise RuntimeError("[Attention!!!] There exists a model in the directory, use --start_epoch 1 to continue training. If want to retraining model, rename the directory first to backup.")
 
         if self.start_epoch != 0:
             self.load_latest_epoch()
@@ -169,7 +169,7 @@ class Logistic_trainer:
 
             Error += error
             Loss += loss.cpu().item()
-            if (i%10==0):
+            if ((i+1)%10==0):
                 self.logger.info(f"[Train raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
 
     def test_DNN_raw(self):
@@ -188,7 +188,7 @@ class Logistic_trainer:
                 Error += error
                 Loss += loss.cpu().item()
 
-                if (i%10==0):
+                if ((i+1)%10==0):
                     self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
         self.list[4].append(Loss / (i + 1))
         self.list[5].append(Error / (i + 1))
@@ -235,7 +235,7 @@ class Logistic_trainer:
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
 
-            if (i%5==0):
+            if ((i+1)%5==0):
                 self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
@@ -279,7 +279,7 @@ class Logistic_trainer:
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
 
-                if (i%5==0):
+                if ((i+1)%5==0):
                     self.logger.info(f"[test] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
@@ -352,6 +352,7 @@ class Logistic_trainer:
         self.draw_figure()
         self.print_and_save_list()
         self.draw_parameters()
+        self.logger.debug("Finish! Good luck!")
 
 
 if __name__ == "__main__":
