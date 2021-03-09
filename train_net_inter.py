@@ -305,13 +305,14 @@ class Logistic_trainer:
         plt.plot(x, test_lr, color='C2', label="Test Ori")
         plt.xlabel("epoch")
         plt.ylabel("loss")
+        plt.legend()
         plt.subplot(212)
         plt.plot(x, train_e, color='C0', label="Train")
         plt.plot(x, test_e, color='C1', label="Test Adv")
         plt.plot(x, test_er, color='C2', label="Test Ori")
         plt.xlabel("epoch")
         plt.ylabel("error")
-        plt.legend()
+        
 
         plt.savefig(os.path.join(self.path["result_path"], "curve.png"))
         plt.close()
