@@ -28,7 +28,6 @@ from dataset import CIFAR10mini
 from utils import Logger, madrys
 
 
-
 def seed_torch(seed=0):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -44,9 +43,10 @@ class Logistic_trainer:
             os.makedirs(args.result_path)
         self.path = {
             "root": args.root,
-            "result_path": args.result_path
+            "result_path": args.result_path,
+            "data_path": args.data_path
         }
-        
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.args = args
         self.loss_type = args.loss_type
@@ -63,11 +63,14 @@ class Logistic_trainer:
         self.order = args.order
         self.seed_num = args.seed
         self.list = [[], [], [], [], [], []]
+
         filename = os.path.join(self.path["result_path"], "log.txt")
+        # If restart training(start_epoch=0), and exists log.txt, delete it.
         if self.start_epoch==0 and os.path.exists(filename):
-            os.remove(filename) 
+            os.remove(filename)
         self.logger = Logger(filename, level=args.log).logger
         self.save_hparam(args)
+
 
     def save_hparam(self, args):
         savepath = os.path.join(self.path["result_path"], "hparam.txt")
@@ -77,19 +80,26 @@ class Logistic_trainer:
                 f.write(f"{key} : {args_dict[key]}\n")
         self.logger.debug("Save the hyper-parameter!")
 
-    def load_latest_epoch(self):
-        model_path = os.path.join(self.path["result_path"], "model.pkl")
-        self.model.load_state_dict(torch.load(model_path))
-        list_path = os.path.join(self.path["result_path"], "list.pkl")
-        self.list = torch.load(list_path)
-        self.logger.debug(f"Load lastest epoch({self.start_epoch-1})")
+    def save_checkpoint(self, epoch):
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "epoch": epoch,
+            "list": self.list
+        }
+        checkpoint_path = os.path.join(self.path["result_path"], f"checkpoint_{epoch}.pth")
+        torch.save(checkpoint, checkpoint_path)
+        self.logger.debug(f"Save checkpoint of epoch({epoch})")
 
-    def save_latest_epoch(self, epoch):
-        model_path = os.path.join(self.path["result_path"], "model.pkl")
-        torch.save(self.model.state_dict(), model_path)
-        list_path = os.path.join(self.path["result_path"], "list.pkl")
-        torch.save(self.list, list_path)
-        self.logger.debug(f"Save lastest epoch({epoch})")
+    def load_checkpoint(self, epoch):
+        checkpoint_path = os.path.join(self.path["result_path"], f"checkpoint_{epoch}.pth")
+        checkpoint = torch.load(checkpoint_path)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        assert checkpoint["epoch"]==epoch
+        self.start_epoch = checkpoint["epoch"]+1
+        self.list = checkpoint["list"]
+        self.logger.debug(f"Load checkpoint of epoch({epoch})")
 
     def prepare_model(self):
         if self.args.model == "resnet18":
@@ -99,19 +109,11 @@ class Logistic_trainer:
         elif self.args.model == "resnet50":
             self.model = torchvision.models.resnet50(pretrained=False, num_classes=self.num_class)
         else:
-            self.logger.error(f"Unknown model name: {self.args.model}")
-            raise ValueError(f"Unknown model name: {self.args.model}")
-        
-        if self.start_epoch==0 and os.path.exists(os.path.join(self.path["result_path"], "model.pkl")):
-            raise RuntimeError("[Attention!!!] There exists a model in the directory, use --start_epoch 1 to continue training. If want to retraining model, rename the directory first to backup.")
-
-        if self.start_epoch != 0:
-            self.load_latest_epoch()
-            self.start_epoch = len(self.list[0])
-        if self.fine_tune_path:
-            self.model.load_state_dict(torch.load(self.fine_tune_path))
+            self.logger.error(f"Unknown model name: {self.args.model}!")
+            raise ValueError(f"Unknown model name: {self.args.model}!")
 
         self.model = self.model.to(self.device)
+
         self.criterion = nn.CrossEntropyLoss()
 
         if self.args.opt.upper() == "SGD":
@@ -119,10 +121,14 @@ class Logistic_trainer:
         else:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
-        self.logger.debug(f"Model {self.args.model}, Optimizer {self.args.opt} used")
+        self.logger.debug(f"Model {self.args.model}, Optimizer {self.args.opt} selected!")
+        if self.start_epoch != 0:
+            self.load_checkpoint(self.start_epoch)
+        if self.fine_tune_path:
+            self.model.load_state_dict(torch.load(self.fine_tune_path))
+
 
     def prepare_dataset(self, **kwargs):
-        self.path["data_path"] = kwargs["data_path"]
         train_transform = kwargs["train_transform"]
         train_shuffle = kwargs["train_shuffle"]
         test_transform = kwargs["test_transform"]
@@ -130,14 +136,14 @@ class Logistic_trainer:
         if self.args.dataset == "CIFAR10":
             train_set = datasets.CIFAR10(root=self.path["data_path"], train=True, download=True, transform=train_transform)
             test_set = datasets.CIFAR10(root=self.path["data_path"], train=False, download=True, transform=test_transform)
-        elif self.args.dataset == "cifar-10-mini":
-            train_set = CIFAR10mini(root='./data', train=True, transform=train_transform, num_per_class=self.args.train_per_class)
-            test_set = CIFAR10mini(root='./data', train=False, transform=test_transform, num_per_class=self.args.test_per_class)
+        elif self.args.dataset == "CIFAR10mini":
+            train_set = CIFAR10mini(root=self.path["data_path"], train=True, transform=train_transform, num_per_class=self.args.train_per_class)
+            test_set = CIFAR10mini(root=self.path["data_path"], train=False, transform=test_transform, num_per_class=self.args.test_per_class)
         else:
             train_set = datasets.ImageFolder(root=self.path["data_path"] + "/train", transform=self.train_transform)
             test_set = datasets.ImageFolder(root=self.path["data_path"] + "/test", transform=self.test_transform)
-        self.train_loader = DataLoader(train_set, batch_size=self.bs, shuffle=train_shuffle, num_workers=4)
-        self.test_loader = DataLoader(test_set, batch_size=self.bs, shuffle=test_shuffle, num_workers=4)
+        self.train_loader = DataLoader(train_set, batch_size=self.bs, shuffle=train_shuffle, num_workers=2)
+        self.test_loader = DataLoader(test_set, batch_size=self.bs, shuffle=test_shuffle, num_workers=2)
 
         self.logger.debug(f"Dataset {self.args.dataset} loaded.")
 
@@ -170,7 +176,7 @@ class Logistic_trainer:
             Error += error
             Loss += loss.cpu().item()
             if ((i+1)%10==0):
-                self.logger.info(f"[Train raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+                self.logger.info(f"[Train raw] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}")
 
     def test_DNN_raw(self):
         self.model.eval()
@@ -189,7 +195,7 @@ class Logistic_trainer:
                 Loss += loss.cpu().item()
 
                 if ((i+1)%10==0):
-                    self.logger.info(f"[Test raw] batch {i+1:3d}: loss: {Loss / (i + 1):0.3f}, Error: {Error / (i + 1):0.3f}")
+                    self.logger.info(f"[Test raw] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}")
         self.list[4].append(Loss / (i + 1))
         self.list[5].append(Error / (i + 1))
 
@@ -236,7 +242,7 @@ class Logistic_trainer:
             Loss_ce += loss_ce.cpu().item()
 
             if ((i+1)%5==0):
-                self.logger.info(f"[Train] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+                self.logger.info(f"[Train] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}, CE: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}")
 
         self.list[0].append(Loss / (i + 1))
         self.list[1].append(Error / (i + 1))
@@ -280,7 +286,7 @@ class Logistic_trainer:
                 Loss_ce += loss_ce.cpu().item()
 
                 if ((i+1)%5==0):
-                    self.logger.info(f"[test] batch {i+1:3d}: inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, loss_ce: {Loss_ce / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f} Error: {Error / (i + 1):0.3f}")
+                    self.logger.info(f"[Test] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}, CE: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}")
 
         self.list[2].append(Loss / (i + 1))
         self.list[3].append(Error / (i + 1))
@@ -294,14 +300,14 @@ class Logistic_trainer:
         plt.figure()
         plt.subplot(211)
         plt.plot(x, train_l, color='C0', label="Train")
-        plt.plot(x, test_l, color='C1', label="Test")
-        plt.plot(x, test_lr, color='C2', label="Test raw")
+        plt.plot(x, test_l, color='C1', label="Test Adv")
+        plt.plot(x, test_lr, color='C2', label="Test Ori")
         plt.xlabel("epoch")
         plt.ylabel("loss")
         plt.subplot(212)
         plt.plot(x, train_e, color='C0', label="Train")
-        plt.plot(x, test_e, color='C1', label="Test")
-        plt.plot(x, test_er, color='C2', label="Test raw")
+        plt.plot(x, test_e, color='C1', label="Test Adv")
+        plt.plot(x, test_er, color='C2', label="Test Ori")
         plt.xlabel("epoch")
         plt.ylabel("error")
         plt.legend()
@@ -334,10 +340,11 @@ class Logistic_trainer:
             plt.close()
 
     def work(self):
+        # pre train epoch
         if self.loss_type!=0 and self.start_epoch==0:
             for _ in range(5):
                 self.train_DNN_raw()
-                # self.test_DNN_raw()
+        # training epoch
         for epoch in range(self.start_epoch, self.epoch_num):
             self.logger.debug(f"Epoch {epoch} start...")
             seed_torch(epoch + args.batchsize)
@@ -345,14 +352,14 @@ class Logistic_trainer:
             self.train_DNN()
             self.test_DNN()
             self.test_DNN_raw()
-            if (epoch%self.args.save_epoch == 0) or (epoch == self.epoch_num-1):
-                self.save_latest_epoch(epoch)
+            if (epoch%self.args.save_epoch == 0):
+                self.save_checkpoint(epoch)
             self.draw_figure()
             self.print_and_save_list()
+        self.save_checkpoint(epoch)    # save the final epoch
         self.draw_figure()
         self.print_and_save_list()
         self.draw_parameters()
-        self.logger.debug("Finish! Good luck!")
 
 
 if __name__ == "__main__":
@@ -387,7 +394,7 @@ if __name__ == "__main__":
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model", default="resnet18", choices=["resnet18", "resnet34", "resnet50"], type=str, help="Backbone Network {Res-18, Res-34, Res-50}.")
-    parser.add_argument("-d", "--dataset", default="cifar-10-mini", type=str, help="Dataset.")   # "CIFAR10"
+    parser.add_argument("-d", "--dataset", default="CIFAR10mini", type=str, help="Dataset.")   # "CIFAR10"
     parser.add_argument("--train_per_class", default=500, type=int, help="train num per class")
     parser.add_argument("--test_per_class", default=100, type=int, help="test num per class")
     parser.add_argument('--device', default=0, type=int)
@@ -398,7 +405,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_class", default=10, type=int, help="Number of image classes")
     parser.add_argument("--epoch_num", default=50, type=int, help="Number of Epochs")        # 50
     parser.add_argument("--start_epoch", default=0, type=int, help="Train start from # epochs")
-    parser.add_argument("--save_epoch", default=1, type=int, help="Save model every # epochs")
+    parser.add_argument("--save_epoch", default=5, type=int, help="Save model every # epochs")
     parser.add_argument("--batchsize", default=2, type=int, help="Batch size")
     parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
     parser.add_argument("--gamma", default=0.9, type=float)
@@ -409,12 +416,11 @@ if __name__ == "__main__":
     parser.add_argument("--lam", type=float, default=-0.1)
     parser.add_argument("--order", type=float, default=0.95)
 
-    parser.add_argument("--grid-size", default=8, type=int)
-    parser.add_argument("--img-size", default=32, type=int)
+    parser.add_argument("--grid_size", default=8, type=int)
+    parser.add_argument("--img_size", default=32, type=int)
     parser.add_argument("--pair_num", default=50, type=int, help='number of point pair of each test img')    # 50
     parser.add_argument("--sample_num", default=32, type=int, help='sample num of S')
-    parser.add_argument("--ratios", default=[0.95], type=list, help='ratios of context') #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1]
-    parser.add_argument("--cal_batch", default=80, type=int, help='calculate # of images per forward')
+    parser.add_argument("--ratios", default=[0.95], type=list, help='ratios of context')
     parser.add_argument('--softmax_type', default='normal', type=str)
 
     args = parser.parse_args()
@@ -427,9 +433,10 @@ if __name__ == "__main__":
 
     if args.dataset == "imagenet" or args.dataset == "tiny-imagenet-200":
         img_size = 224
-    elif args.dataset == "CIFAR10" or args.dataset == "cifar-10-mini":
+    elif args.dataset == "CIFAR10" or args.dataset == "CIFAR10mini":
         img_size = 32
-    args.data_path = os.path.join(args.root, "data", args.dataset)
+    # args.data_path = os.path.join(args.root, "data")
+    args.data_path= "./data"
 
     train_transform = transforms.Compose([
         transforms.RandomCrop(img_size, padding=4),
@@ -443,6 +450,6 @@ if __name__ == "__main__":
 
     trainer = Logistic_trainer(args)
     trainer.prepare_model()
-    trainer.prepare_dataset(data_path=args.data_path, train_transform=train_transform, train_shuffle=True, test_transform=test_transform, test_shuffle=True)
+    trainer.prepare_dataset(train_transform=train_transform, train_shuffle=True, test_transform=test_transform, test_shuffle=True)
 
     trainer.work()

@@ -15,8 +15,6 @@ class Logger(object):
         'crit': logging.CRITICAL
     }
     def __init__(self, filename, level='info', when='D', backCount=3, fmt='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S"):
-        if os.path.exists(filename):
-            os.remove(filename)
         format_str = logging.Formatter(fmt, datefmt)
         self.logger = logging.getLogger(filename)
         self.logger.setLevel(self.level_relations.get(level))
