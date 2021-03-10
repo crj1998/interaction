@@ -362,6 +362,7 @@ class Logistic_trainer:
         self.draw_figure()
         self.print_and_save_list()
         self.draw_parameters()
+        self.logger.debug("Finished! Good luck!")
 
 
 if __name__ == "__main__":
