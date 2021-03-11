@@ -23,7 +23,7 @@ import torchvision.datasets as datasets
 
 from torch.utils.data import DataLoader
 
-from interaction import inter_m_order
+from interaction import inter_m_order, gen_mask
 from dataset import CIFAR10mini
 from utils import Logger, madrys
 
@@ -63,6 +63,7 @@ class Logistic_trainer:
         self.order = args.order
         self.seed_num = args.seed
         self.list = [[], [], [], [], [], []]
+        self.mask = gen_mask(0.95, args.pair_num, args.sample_num, args.grid_size, args.img_size, local_size=1)
 
         filename = os.path.join(self.path["result_path"], "log.txt")
         # If restart training(start_epoch=0), write it , otherwise append.
@@ -112,7 +113,6 @@ class Logistic_trainer:
         else:
             self.logger.error(f"Unknown model name: {self.args.model}!")
             raise ValueError(f"Unknown model name: {self.args.model}!")
-
         self.model = self.model.to(self.device)
 
         self.criterion = nn.CrossEntropyLoss()
@@ -122,11 +122,13 @@ class Logistic_trainer:
         else:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
-        self.logger.debug(f"Model {self.args.model}, Optimizer {self.args.opt} selected!")
+        # start from checkpoint, or start from fine tune model, or start from empty model
         if self.start_epoch != 0:
             self.load_checkpoint(self.start_epoch)
-        if self.fine_tune_path:
+        elif self.fine_tune_path:
             self.model.load_state_dict(torch.load(self.fine_tune_path))
+        
+        self.logger.debug(f"Model {self.args.model}, Optimizer {self.args.opt} selected!")
 
 
     def prepare_dataset(self, **kwargs):
@@ -134,6 +136,7 @@ class Logistic_trainer:
         train_shuffle = kwargs["train_shuffle"]
         test_transform = kwargs["test_transform"]
         test_shuffle = kwargs["test_shuffle"]
+
         if self.args.dataset == "CIFAR10":
             train_set = datasets.CIFAR10(root=self.path["data_path"], train=True, download=True, transform=train_transform)
             test_set = datasets.CIFAR10(root=self.path["data_path"], train=False, download=True, transform=test_transform)
@@ -143,6 +146,7 @@ class Logistic_trainer:
         else:
             train_set = datasets.ImageFolder(root=self.path["data_path"] + "/train", transform=self.train_transform)
             test_set = datasets.ImageFolder(root=self.path["data_path"] + "/test", transform=self.test_transform)
+
         self.train_loader = DataLoader(train_set, batch_size=self.bs, shuffle=train_shuffle, num_workers=2)
         self.test_loader = DataLoader(test_set, batch_size=self.bs, shuffle=test_shuffle, num_workers=2)
 
@@ -153,78 +157,77 @@ class Logistic_trainer:
         for param_group in self.optimizer.param_groups:
             lr += [param_group['lr']]
         return lr
+    
+    def get_acc(self, preds, lbls):
+        acc = (preds==lbls).sum().item()/lbls.size(0)
+        return acc
 
-    def get_error(self, pre, lbl):
-        acc = torch.sum(pre == lbl).item() / len(pre)
-        return 1 - acc
-
-    def train_DNN_raw(self):
+    def train_DNN_ori(self):
         self.model.train()
-        Loss, Error = 0, 0
+        Loss, Acc = 0, 0
         for i, (images, labels) in enumerate(self.train_loader):
             images, labels = images.to(self.device), labels.to(self.device)
 
-            output = self.model(images)
-            loss = self.criterion(output, labels)
+            outputs = self.model(images)
+            loss = self.criterion(outputs, labels)
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
-            preds = output.detach().argmax(dim=1)
-            error = self.get_error(preds, labels)
+            preds = outputs.detach().argmax(dim=1)
+            acc = self.get_acc(preds, labels)
 
-            Error += error
+            Acc += acc
             Loss += loss.cpu().item()
-            if ((i+1)%10==0):
-                self.logger.info(f"[Train raw] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}")
+            if ((i+1)%20==0):
+                self.logger.info(f"[Train ori] batch {i+1:3d}: Acc: {Acc/(i+1):0.0%}, Loss: {Loss/(i+1):0.4f}")
 
-    def test_DNN_raw(self):
+    def test_DNN_ori(self):
         self.model.eval()
-        Loss, Error = 0, 0
+        Loss, Acc = 0, 0
         with torch.no_grad():
             for i, (images, labels) in enumerate(self.test_loader):
                 images, labels = images.to(self.device), labels.to(self.device)
 
-                output = self.model(images)
-                loss = self.criterion(output, labels)
+                outputs = self.model(images)
+                loss = self.criterion(outputs, labels)
 
-                preds = output.detach().argmax(dim=1)
-                error = self.get_error(preds, labels)
+                preds = outputs.detach().argmax(dim=1)
+                acc = self.get_acc(preds, labels)
 
-                Error += error
+                Acc += acc
                 Loss += loss.cpu().item()
 
-                if ((i+1)%10==0):
-                    self.logger.info(f"[Test raw] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}")
-        self.list[4].append(Loss / (i + 1))
-        self.list[5].append(Error / (i + 1))
+                if ((i+1)%20==0):
+                    self.logger.info(f"[Test ori] batch {i+1:3d}: Acc: {Acc/(i+1):0.0%}, Loss: {Loss/(i + 1):0.4f}")
+        self.list[4].append(Loss/(i+1))
+        self.list[5].append(Acc/(i+1))
 
 
 
     def train_DNN(self):
         self.model.train()
         # torch.autograd.set_detect_anomaly(True)
-        Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
+        Loss, Loss_ce, Loss_inter, Acc = 0, 0, 0, 0
         Loss_inter_ori, Loss_inter_adv = 0, 0
-        for i, (img, lbl) in enumerate(self.train_loader):
-            img = img.to(self.device)          # shape: torch.Size([64, 3, 32, 32])
-            lbl = lbl.to(self.device)
-            img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
+        for i, (images, labels) in enumerate(self.train_loader):
+            images, labels = images.to(self.device), labels.to(self.device)
+            images_adv = madrys(self.model, images, labels, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
             self.model.train()
-            output = self.model(img_adv)
-            loss_ce = self.criterion(output, lbl)
+            outputs_adv = self.model(images_adv)
+            loss_ce = self.criterion(outputs_adv, labels)
             if self.loss_type==0:
                 loss = loss_ce
             else:
-                loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+                loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.mask, self.logger)
                 Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                 if self.loss_type==1:
                     loss = loss_ce + self.lam * loss_inter_adv.mean()
                 elif self.loss_type==2:
-                    loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
-                    loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
-                    loss = loss_ce + self.lam * loss_inter    # loss 2
+                    loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.mask, self.logger)
+                    loss_inter = torch.norm(loss_inter_adv-loss_inter_img, p=2, dim=1).mean()
+                    loss = loss_ce + self.lam * loss_inter
                     Loss_inter_ori += loss_inter_img.mean().cpu().item()
                     Loss_inter += loss_inter.cpu().item()
                 else:
@@ -235,62 +238,61 @@ class Logistic_trainer:
             loss.backward()
             self.optimizer.step()
 
-            pre = output.detach().argmax(dim=1)
-            error = self.get_error(pre, lbl)
+            preds_adv = outputs_adv.detach().argmax(dim=1)
+            acc = self.get_acc(preds_adv, labels)
 
-            Error += error
+            Acc += acc
             Loss += loss.cpu().item()
             Loss_ce += loss_ce.cpu().item()
 
-            if ((i+1)%5==0):
-                self.logger.info(f"[Train] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}, CE: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}")
+            if ((i+1)%10==0):
+                self.logger.info(f"[Train] batch {i+1:3d}: Acc: {Acc/(i+1):0.2%}, Loss: {Loss/(i+1):0.4f}, CE: {Loss_ce/(i+1):0.4f}, loss_inter: {Loss_inter/(i+1):0.4f}, inter_ori: {Loss_inter_ori/(i+1):0.4f}, inter_adv: {Loss_inter_adv/(i+1):0.4f}")
 
-        self.list[0].append(Loss / (i + 1))
-        self.list[1].append(Error / (i + 1))
+        self.list[0].append(Loss/(i+1))
+        self.list[1].append(Acc/(i+1))
 
 
     def test_DNN(self):
         self.model.eval()
 
-        Loss, Loss_ce, Loss_inter, Error = 0, 0, 0, 0
+        Loss, Loss_ce, Loss_inter, Acc = 0, 0, 0, 0
         Loss_inter_ori, Loss_inter_adv = 0, 0
         with torch.no_grad():
-            for i, (img, lbl) in enumerate(self.test_loader):
-                img = img.to(self.device)
-                lbl = lbl.to(self.device)
-                img_adv = madrys(self.model, img, lbl, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
+            for i, (images, labels) in enumerate(self.test_loader):
+                images, labels = images.to(self.device), labels.to(self.device)
+                images_adv = madrys(self.model, images, labels, self.device, step_size = 2/255, epsilon= 8/255, perturb_steps=5, isnormalize=False)
 
-                output = self.model(img_adv)
-                loss_ce = self.criterion(output, lbl)
+                outputs_adv = self.model(images_adv)
+                loss_ce = self.criterion(outputs_adv, labels)
                 if self.loss_type==0:
                     loss = loss_ce
                 else:
-                    loss_inter_adv = inter_m_order(self.args, self.model, img_adv, lbl, self.logger)
+                    loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.mask, self.logger)
                     Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                     if self.loss_type==1:
                         loss = loss_ce + self.lam * loss_inter_adv.mean()
                     elif self.loss_type==2:
-                        loss_inter_img = inter_m_order(self.args, self.model, img, lbl, self.logger)
-                        loss_inter = (torch.sqrt((loss_inter_adv - loss_inter_img) ** 2)).mean()
-                        loss = loss_ce + self.lam * loss_inter    # loss 2
+                        loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.mask, self.logger)
+                        loss_inter = torch.norm(loss_inter_adv-loss_inter_img, p=2, dim=1).mean()
+                        loss = loss_ce + self.lam * loss_inter
                         Loss_inter_ori += loss_inter_img.mean().cpu().item()
                         Loss_inter += loss_inter.cpu().item()
                     else:
                         raise ValueError("Unknown Loss type.")
                     self.model.train()
 
-                pre = output.detach().argmax(dim=1)
-                error = self.get_error(pre, lbl)
+                preds_adv = outputs_adv.detach().argmax(dim=1)
+                acc = self.get_acc(preds_adv, labels)
 
-                Error += error
+                Acc += acc
                 Loss += loss.cpu().item()
                 Loss_ce += loss_ce.cpu().item()
 
-                if ((i+1)%5==0):
-                    self.logger.info(f"[Test] batch {i+1:3d}: Error: {Error / (i + 1):0.3f}, Loss: {Loss / (i + 1):0.3f}, CE: {Loss_ce / (i + 1):0.3f}, loss_inter: {Loss_inter / (i + 1):0.3f}, inter_ori: {Loss_inter_ori / (i + 1):0.3f}, inter_adv: {Loss_inter_adv / (i + 1):0.3f}")
+                if ((i+1)%10==0):
+                    self.logger.info(f"[Test] batch {i+1:3d}: Acc: {Acc/(i+1):0.2%}, Loss: {Loss/(i+1):0.4f}, CE: {Loss_ce/(i+1):0.4f}, loss_inter: {Loss_inter/(i+1):0.4f}, inter_ori: {Loss_inter_ori/(i+1):0.4f}, inter_adv: {Loss_inter_adv/(i+1):0.4f}")
 
-        self.list[2].append(Loss / (i + 1))
-        self.list[3].append(Error / (i + 1))
+        self.list[2].append(Loss/(i+1))
+        self.list[3].append(Acc/(i+1))
 
 
     def draw_figure(self):
@@ -321,14 +323,14 @@ class Logistic_trainer:
         save_path = os.path.join(self.path["result_path"], "list.txt")
         with open(save_path, "w") as f:
             train_loss = self.list[0]
-            train_error = self.list[1]
+            train_acc = self.list[1]
             test_loss = self.list[2]
-            test_error = self.list[3]
-            test_loss_raw = self.list[4]
-            test_error_raw = self.list[5]
+            test_acc = self.list[3]
+            test_loss_ori = self.list[4]
+            test_acc_ori = self.list[5]
 
             for i in range(len(train_loss)):
-                f.write(f"Epoch{i+1:3d} train_loss:{train_loss[i]:0.3f}, train_error:{train_error[i]:0.3f}, test_loss:{test_loss[i]:0.3f}, test_error:{test_error[i]:0.3f}, test_loss_raw:{test_loss_raw[i]:0.3f}, test_error_raw:{test_error_raw[i]:0.3f}\n")
+                f.write(f"Epoch{i+1:4d} train_loss:{train_loss[i]:0.4f}, train_acc:{train_acc[i]:0.2%}, test_loss:{test_loss[i]:0.4f}, test_acc:{test_acc[i]:0.2%}, test_loss_ori:{test_loss_ori[i]:0.4f}, test_error_ori:{test_acc_ori[i]:0.2%}\n")
 
     def draw_parameters(self):
         self.path['distribution_path'] = os.path.join(self.path['result_path'], "distribution")
@@ -343,9 +345,9 @@ class Logistic_trainer:
 
     def work(self):
         # pre train epoch
-        if self.loss_type!=0 and self.start_epoch==0:
-            for _ in range(5):
-                self.train_DNN_raw()
+        if self.loss_type!=0 and self.start_epoch==0 and self.fine_tune_path==None:
+            for _ in range(50):
+                self.train_DNN_ori()
         # training epoch
         for epoch in range(self.start_epoch, self.epoch_num):
             self.logger.debug(f"Epoch {epoch} start...")
@@ -353,7 +355,7 @@ class Logistic_trainer:
             self.lr = self.get_learning_rate()
             self.train_DNN()
             self.test_DNN()
-            self.test_DNN_raw()
+            self.test_DNN_ori()
             if (epoch%self.args.save_epoch == 0):
                 self.save_checkpoint(epoch)
             self.draw_figure()

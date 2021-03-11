@@ -73,65 +73,6 @@ def gen_context(point_list, grid_size, sample_num, r=0.95):
     players = np.array(players)
     return players
 
-def compute_order_interaction_img(args, model, img_adv, lbl, point_list, players, r):
-    #device = args.device if args.device == "cpu" else int(args.device)
-    device = 0  # Do not modify
-    model.to(device)
-
-    with torch.no_grad():
-        model.eval()
-        img_size = args.img_size
-        channels = img_adv.size(0)
-        tic = time.time()
-        adv_interaction = []  # save order interactions of point-pairs in adv image
-
-        forward_mask = []
-        for p, pt in enumerate(point_list):
-            point1, point2 = pt[0], pt[1]
-            # print("i: %d, j: %d" % (point1, point2))
-
-            players_thispair = players[p]
-            #print("players_thispair.shape:", np.shape(players[p]))   #(100, 241)
-            m = int((args.grid_size ** 2 - 2) * r)  # m-order
-            mask = torch.zeros((4 * args.sample_num, channels, args.grid_size * args.grid_size)).to(device)
-
-            for k in range(args.sample_num):
-                mask[4*k:4*(k+1), :, players_thispair[k]] = 1  # S
-                mask[4*k+1, :, point1] = 1  # S U {i}
-                mask[4*k+2, :, point2] = 1  # S U {j}
-                mask[4*k, :, point1] = 1
-                mask[4*k, :, point2] = 1    # S U {i,j}
-            mask = mask.view(4 * args.sample_num, channels, args.grid_size, args.grid_size)
-            mask = F.interpolate(mask.clone(), size=[img_size, img_size], mode="nearest").float()
-            #print("mask.shape:", np.shape(mask))  # torch.Size([400, 3, 32, 32])
-
-            forward_mask.append(mask)
-            if (len(forward_mask) < args.cal_batch // args.sample_num) and (p < args.pair_num - 1):
-                continue
-            else:
-                forward_batch = len(forward_mask) * args.sample_num
-                batch_mask = torch.cat(forward_mask, dim=0)
-                expand_img_adv = img_adv.expand(4 * forward_batch, -1, img_size, img_size).clone()
-                masked_img_adv = batch_mask * expand_img_adv
-
-                output_adv = model(masked_img_adv)             # torch.Size([400, 10])
-
-                if args.softmax_type == 'normal':
-                    y_adv = F.log_softmax(output_adv, dim=1)[:, lbl]  # lbl[0]
-
-                for k in range(forward_batch):
-                    score_adv = y_adv[4 * k] + y_adv[4 * k + 3] - y_adv[4 * k + 1] - y_adv[4 * k + 2]
-                    #print("score_adv:", score_adv)             # 一个值，0.0001 到 0.001 这个数量级左右
-                    adv_interaction.append(score_adv.item())
-                forward_mask = []
-
-        #print("adv_interaction.shape:", np.shape(adv_interaction))  # (20000,)
-        #print("adv_interaction:",adv_interaction )
-        adv_interaction = np.array(adv_interaction).reshape(-1, args.sample_num)
-
-        print('Image: 1 张图 , time: %.3f' % ( time.time() - tic))   # time: 15.983s
-
-        return adv_interaction
 
 def gen_mask(r, pair_num, sample_num, grid_size, img_size, local_size=1):
     point_list = gene_local_points(grid_size, pair_num, local_size)       # (pair_num: 200, 2)
@@ -153,7 +94,7 @@ def gen_mask(r, pair_num, sample_num, grid_size, img_size, local_size=1):
     return batch_mask
 
 
-def compute_order_interaction_img_timecut(net, imgs, lbls, mask, pair_num, sample_num):
+def compute_order_interaction_img(net, imgs, lbls, mask, pair_num, sample_num):
     mask_size = mask.size(0)    # pair_num*sample_num*4 : 80000
     assert pair_num * sample_num * 4 == mask_size
     N = imgs.size(0)
@@ -170,7 +111,7 @@ def compute_order_interaction_img_timecut(net, imgs, lbls, mask, pair_num, sampl
     lbl_logits = lbl_logits.reshape(N * pair_num, sample_num * 4)
     inter = lbl_logits[:, 0::4] + lbl_logits[:, 3::4] - lbl_logits[:, 1::4] - lbl_logits[:, 2::4]
 
-    inter = inter.reshape(N, pair_num, sample_num)  # shape: (N, pair_num, sample_num)
+    inter = inter.reshape(N, pair_num*sample_num)  # shape: (N, pair_num, sample_num)
     # inter = inter.mean(dim=2)
     return inter
 
@@ -195,15 +136,11 @@ def get_interaction_all(args, all_imgs, delta_f , norm_factor_adv=1):
 
     return np.array(adv_orders_inter_mean), np.array(adv_orders_inter_std)
 
-def inter_m_order(args, model, image, label, logger):
-    # 传入一个batch图像，传出一个batch图像的interaction , 先仅计算单阶 0.95n
-    #delta_f_batch = 0
+def inter_m_order(args, model, image, label, mask, logger):
 
-    for r in args.ratios:
-        mask = gen_mask(r, args.pair_num, args.sample_num, args.grid_size, args.img_size, local_size=1)
-        delta_f_batch = compute_order_interaction_img_timecut(model, image, label, mask, args.pair_num, args.sample_num) # shape: (N, pair_num, sample_num)
+    delta_f_batch = compute_order_interaction_img(model, image, label, mask, args.pair_num, args.sample_num) # shape: (N, pair_num, sample_num)
 
-        inter_m_mean = torch.mean(delta_f_batch, dim=2)
-        inter_m_mean = torch.mean(inter_m_mean, dim=1)
+    # inter_m_mean = torch.mean(delta_f_batch, dim=2)
+    # inter_m_mean = torch.mean(inter_m_mean, dim=1)
 
-    return inter_m_mean
+    return delta_f_batch
