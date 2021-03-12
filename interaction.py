@@ -114,6 +114,68 @@ def compute_order_interaction_img(net, imgs, lbls, mask, pair_num, sample_num):
     return inter
 
 
+
+def images_mask(N, img_size, r, grid_size, pair_num, sample_num):
+    m = int((grid_size ** 2 - 2) * r)    # number of super pixel equal to 1
+    mask_size = 4*pair_num*sample_num
+
+    tmp = np.tile(np.arange(grid_size*grid_size), (N*pair_num, 1))
+    tmp = np.apply_along_axis(np.random.permutation, axis=1, arr=tmp)
+    tmp = np.repeat(tmp, axis=0, repeats=sample_num)
+    point_pairs, contexts = tmp[:, :2], tmp[:, 2:]
+    contexts = np.apply_along_axis(np.random.choice, axis=1, arr=contexts, size=m, replace=False)
+    del tmp
+    
+    mask = np.zeros((N*pair_num*sample_num*4, grid_size*grid_size), dtype=np.uint8)
+    np.put_along_axis(mask, np.repeat(contexts, axis=0, repeats=4), axis=1, values=1)    # S
+    np.put_along_axis(mask[0::4], point_pairs, axis=1, values=1)    # S U {i,j}
+    np.put_along_axis(mask[1::4], point_pairs[:, [0]], axis=1, values=1)    # S U {i}
+    np.put_along_axis(mask[2::4], point_pairs[:, [1]], axis=1, values=1)    # S U {j}
+    
+    assert mask.shape[0] == 4*pair_num*sample_num*N
+
+    mask = mask.reshape(4*pair_num*sample_num*N, 8, 8)
+
+    return mask
+
+def masked(images, r, grid_size, pair_num, sample_num):
+    N, channels, img_size = images.size(0), images.size(1), images.size(2)
+    mask_size = 4*pair_num*sample_num
+    masks = images_mask(N, img_size, r, grid_size, pair_num, sample_num)
+    expand_images = images.repeat_interleave(mask_size, dim=0)
+    size = img_size//grid_size
+
+    masks = torch.from_numpy(masks).to(images.device)
+    masks = torch.unsqueeze(masks, dim=1).expand(-1, channels, -1, -1)
+    pooling_images = (expand_images.reshape(N*mask_size, 3, grid_size, size, grid_size, size).sum(axis=(-3, -1)))*(1-masks)/(size**2)
+    
+    masks = F.interpolate(masks, size=[img_size, img_size], mode="nearest")
+    pooling_images = F.interpolate(pooling_images, size=[img_size, img_size], mode="nearest")
+    
+    masked_images = masks*expand_images + pooling_images
+    
+    return masked_images
+
+
+def compute_order_interaction_img_new(net, imgs, lbls, args):
+    masked_imgs = masked(imgs, args.ratios[0], args.grid_size, args.pair_num, args.sample_num)
+    mask_size = 4*args.pair_num*args.sample_num
+    N = imgs.size(0)
+
+    net.eval()
+    logits = F.log_softmax(net(masked_imgs), dim=-1)  # Shape: (N*pair_num*sample_num*4, num_classes)
+    assert logits.shape[0] == mask_size * N
+
+    lbls_mask = torch.repeat_interleave(lbls, repeats=mask_size, dim=0).reshape(mask_size * N, 1)
+    lbl_logits = torch.gather(logits, dim=1, index=lbls_mask).squeeze(dim=1)
+    lbl_logits = lbl_logits.reshape(N * args.pair_num, args.sample_num * 4)
+    inter = lbl_logits[:, 0::4] + lbl_logits[:, 3::4] - lbl_logits[:, 1::4] - lbl_logits[:, 2::4]
+
+    inter = inter.reshape(N, args.pair_num*args.sample_num)  # shape: (N, pair_num, sample_num)
+    return inter
+
+
+
 def get_interaction_all(args, all_imgs, delta_f , norm_factor_adv=1):
     adv_orders_inter_mean = []
     adv_orders_inter_std = []
@@ -137,7 +199,8 @@ def get_interaction_all(args, all_imgs, delta_f , norm_factor_adv=1):
 def inter_m_order(args, model, image, label, logger):
     r = args.ratios[0]
     mask = gen_mask(r, args.pair_num, args.sample_num, args.grid_size, args.img_size, local_size=1)
-    delta_f_batch = compute_order_interaction_img(model, image, label, mask, args.pair_num, args.sample_num) # shape: (N, pair_num, sample_num)
+    # delta_f_batch = compute_order_interaction_img(model, image, label, mask, args.pair_num, args.sample_num) # shape: (N, pair_num, sample_num)
+    delta_f_batch = compute_order_interaction_img_new(model, image, label, args)
 
     # inter_m_mean = torch.mean(delta_f_batch, dim=2)
     # inter_m_mean = torch.mean(inter_m_mean, dim=1)

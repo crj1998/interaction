@@ -345,7 +345,7 @@ class Logistic_trainer:
     def work(self):
         # pre train epoch
         if self.loss_type!=0 and self.start_epoch==0 and self.fine_tune_path==None:
-            for _ in range(5):
+            for _ in range(2):
                 self.train_DNN_ori()
         # training epoch
         for epoch in range(self.start_epoch, self.epoch_num):
