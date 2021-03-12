@@ -63,7 +63,6 @@ class Logistic_trainer:
         self.order = args.order
         self.seed_num = args.seed
         self.list = [[], [], [], [], [], []]
-        self.mask = gen_mask(0.95, args.pair_num, args.sample_num, args.grid_size, args.img_size, local_size=1)
 
         filename = os.path.join(self.path["result_path"], "log.txt")
         # If restart training(start_epoch=0), write it , otherwise append.
@@ -220,12 +219,12 @@ class Logistic_trainer:
             if self.loss_type==0:
                 loss = loss_ce
             else:
-                loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.mask, self.logger)
+                loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.logger)
                 Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                 if self.loss_type==1:
                     loss = loss_ce + self.lam * loss_inter_adv.mean()
                 elif self.loss_type==2:
-                    loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.mask, self.logger)
+                    loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.logger)
                     loss_inter = torch.norm(loss_inter_adv-loss_inter_img, p=2, dim=1).mean()
                     loss = loss_ce + self.lam * loss_inter
                     Loss_inter_ori += loss_inter_img.mean().cpu().item()
@@ -267,12 +266,12 @@ class Logistic_trainer:
                 if self.loss_type==0:
                     loss = loss_ce
                 else:
-                    loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.mask, self.logger)
+                    loss_inter_adv = inter_m_order(self.args, self.model, images_adv, labels, self.logger)
                     Loss_inter_adv += loss_inter_adv.mean().cpu().item()
                     if self.loss_type==1:
                         loss = loss_ce + self.lam * loss_inter_adv.mean()
                     elif self.loss_type==2:
-                        loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.mask, self.logger)
+                        loss_inter_img = inter_m_order(self.args, self.model, images, labels, self.logger)
                         loss_inter = torch.norm(loss_inter_adv-loss_inter_img, p=2, dim=1).mean()
                         loss = loss_ce + self.lam * loss_inter
                         Loss_inter_ori += loss_inter_img.mean().cpu().item()
@@ -346,7 +345,7 @@ class Logistic_trainer:
     def work(self):
         # pre train epoch
         if self.loss_type!=0 and self.start_epoch==0 and self.fine_tune_path==None:
-            for _ in range(50):
+            for _ in range(5):
                 self.train_DNN_ori()
         # training epoch
         for epoch in range(self.start_epoch, self.epoch_num):

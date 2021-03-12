@@ -20,7 +20,6 @@ def gene_local_points(grid_size, pair_num, local_size=1):
                 neighbor.append(item)
 
     neighbor = np.array(neighbor)
-    np.random.seed(1)
 
     tot_pairs = []
     for k in range(pair_num):
@@ -55,7 +54,6 @@ def gene_local_points(grid_size, pair_num, local_size=1):
     return tot_pairs
 
 def gen_context(point_list, grid_size, sample_num, r=0.95):
-    np.random.seed(1)
     players = []
     m = int((grid_size ** 2 - 2) * r)  # m-order
     for p, (point1, point2) in enumerate(point_list):
@@ -136,8 +134,9 @@ def get_interaction_all(args, all_imgs, delta_f , norm_factor_adv=1):
 
     return np.array(adv_orders_inter_mean), np.array(adv_orders_inter_std)
 
-def inter_m_order(args, model, image, label, mask, logger):
-
+def inter_m_order(args, model, image, label, logger):
+    r = args.ratios[0]
+    mask = gen_mask(r, args.pair_num, args.sample_num, args.grid_size, args.img_size, local_size=1)
     delta_f_batch = compute_order_interaction_img(model, image, label, mask, args.pair_num, args.sample_num) # shape: (N, pair_num, sample_num)
 
     # inter_m_mean = torch.mean(delta_f_batch, dim=2)
